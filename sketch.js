@@ -31,6 +31,12 @@ function preload() {
 }
 
 function setup() {
+  // Carrega o recorde guardado (se existir) a partir do localStorage
+  let storedHighScore = localStorage.getItem("highScore");
+  if (storedHighScore !== null) {
+    highScore = int(storedHighScore);
+  }
+
   createCanvas(1280, 720);
   
   video = createCapture(VIDEO); 
@@ -112,7 +118,11 @@ function playGame() {
   timeLeft = gameDuration - elapsedTime;
   
   if (timeLeft <= 0) {
-    if (score > highScore) highScore = score;
+    if (score > highScore) {
+      highScore = score;
+      // Guarda o novo recorde para não se perder ao recarregar a página
+      localStorage.setItem("highScore", highScore);
+    }
     gameState = "END";
     return;
   }
