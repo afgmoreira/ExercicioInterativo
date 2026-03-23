@@ -77,6 +77,8 @@ let videoScale = 1;
 let videoOffsetX = 0;
 let videoOffsetY = 0;
 
+// Posiciona o campo de texto do nome na zona certa do ecrã
+// mesmo que a janela do navegador mude de tamanho
 function positionNameInput() {
   if (!nameInput || !cnv) return;
   let inputW = 290; 
@@ -86,10 +88,12 @@ function positionNameInput() {
   nameInput.position(x, y);
 }
 
+// Carrega o modelo de BodyPose (BlazePose) da ml5 antes de iniciar o sketch
 function preload() {
   bodyPose = ml5.bodyPose("BlazePose", { flipped: false });
 }
 
+// Configuração inicial do jogo: áudio, ranking, câmara e interface
 function setup() {
   synth = new p5.MonoSynth();
 
@@ -151,8 +155,10 @@ function updateMenuTargets() {
   menuTargetR = { x: width * 0.75, y: height * 0.8, r: 80 };
 }
 
+// Callback da ml5: recebe a lista de poses detetadas em cada frame
 function gotPoses(results) { poses = results; }
 
+// Função principal do p5 que corre em loop: desenha vídeo, pulsos e ecrãs de jogo
 function draw() {
   background(20);
   
@@ -206,6 +212,7 @@ function draw() {
 // ECRÃS E LÓGICA DE JOGO
 // ==========================================
 
+// Desenha o ecrã inicial com instruções, nome do jogador e ranking
 function drawStartScreen() {
   noStroke();
   
@@ -240,9 +247,9 @@ function drawStartScreen() {
   text("1. Move os braços até aos círculos.\n\n2. Mantém os pulsos nos alvos 1–2s.\n\n3. Ganha o máximo de pontos em 60s.", panelX + panelW / 2, panelY + 90);
 
   // DIREITA: TÍTULO DA CAIXA DE NOME E RANKING
-  let rightCenterX = width * 0.82; // Eixo central da coluna da direita
+  let rightCenterX = width * 0.82; 
   
-  textAlign(CENTER, CENTER); // Repor alinhamento
+  textAlign(CENTER, CENTER); 
   fill(0, 255, 0); textSize(22); textStyle(BOLD);
   text("JOGADOR:", rightCenterX, height * 0.26);
   textStyle(NORMAL);
@@ -251,7 +258,7 @@ function drawStartScreen() {
   drawRanking(rightCenterX, height * 0.44); 
 
   // CENTRO: RECORDE E DIFICULDADE
-  // ---> A CORREÇÃO PRINCIPAL ESTÁ AQUI: forçar o alinhamento ao Centro!
+
   textAlign(CENTER, CENTER); 
   let infoY = height * 0.40;
   
@@ -274,6 +281,7 @@ function drawStartScreen() {
   drawingContext.shadowBlur = 0;
 }
 
+// Lógica do jogo durante o tempo de jogo (estado PLAY)
 function playGame() {
   let elapsedTime = floor((millis() - gameStartTime) / 1000);
   timeLeft = gameDuration - elapsedTime;
@@ -325,6 +333,7 @@ function playGame() {
   });
 }
 
+// Desenha o ecrã final com resultado, nome do jogador e ranking
 function drawEndScreen() {
   noStroke();
 
@@ -355,7 +364,7 @@ function drawEndScreen() {
   textSize(45);
   text("Pontuação: " + score, width / 2, startY + 205);
   
-  // Ranking (Agora limpo e com o destaque inserido)
+  // Ranking 
   drawRanking(width / 2, startY + 280);
 
   // Instrução para Repetir
@@ -369,6 +378,7 @@ function drawEndScreen() {
 // LÓGICA CORE (Rastreamento e Interação)
 // ==========================================
 
+// Seleciona a pose principal (a pessoa "principal") com base na posição do nariz / pulsos
 function getMainPose() {
   if (!poses || poses.length === 0) return null;
   let bestPose = null, bestScore = Infinity; 
@@ -394,6 +404,7 @@ function getMainPose() {
   return bestPose;
 }
 
+// Aplica suavização (lerp) às posições dos pulsos para evitar tremores na imagem
 function updateWrists() {
   let pose = getMainPose();
   if (pose) {
@@ -411,6 +422,7 @@ function updateWrists() {
   } else { smoothWristL.confidence = 0; smoothWristR.confidence = 0; }
 }
 
+// Converte as coordenadas dos pulsos do vídeo para coordenadas de ecrã (espelhadas)
 function updateDisplayWrists() {
   displayWristL.confidence = smoothWristL.confidence;
   if (smoothWristL.confidence > 0.1) {
@@ -424,12 +436,15 @@ function updateDisplayWrists() {
   }
 }
 
+// Desenha os círculos verdes que representam os pulsos do jogador
 function drawWrists() {
   fill(0, 255, 0); noStroke();
   if (displayWristL.confidence > 0.1) circle(displayWristL.x, displayWristL.y, 30);
   if (displayWristR.confidence > 0.1) circle(displayWristR.x, displayWristR.y, 30);
 }
 
+// Verifica se os dois pulsos estão dentro dos alvos durante o tempo mínimo necessário
+// Se o jogador conseguir manter os pulsos, chama o callback onSuccessCallback
 function checkInteraction(tL, tR, onSuccessCallback) {
   let isHovering = false;
   if (displayWristL.confidence > 0.1 && displayWristR.confidence > 0.1) {
@@ -486,6 +501,7 @@ function checkInteraction(tL, tR, onSuccessCallback) {
   }
 }
 
+// Gera novas posições aleatórias para os alvos esquerdo e direito, em função da dificuldade
 function generateTargets() {
   let margin = 150; 
   targetL.r = targetBaseRadius; targetR.r = targetBaseRadius;
@@ -493,6 +509,7 @@ function generateTargets() {
   targetR.x = random((width / 2) + margin, width - margin); targetR.y = random(margin, height - margin);
 }
 
+// Inicia uma nova partida: pede áudio ao utilizador, regista o nome e reinicia variáveis
 function startGame() {
   userStartAudio();
   
@@ -508,6 +525,7 @@ function startGame() {
   applyDifficultySettings(); generateTargets();
 }
 
+// Define o tamanho base dos alvos de acordo com a dificuldade atual
 function applyDifficultySettings() {
   if (difficulty === "FÁCIL") targetBaseRadius = 100;
   else if (difficulty === "MÉDIO") targetBaseRadius = 80;
@@ -517,6 +535,7 @@ function applyDifficultySettings() {
   }
 }
 
+// Atualiza automaticamente a dificuldade com base na pontuação atual do jogador
 function updateDifficultyByScore() {
   let oldDifficulty = difficulty;
 
@@ -531,10 +550,11 @@ function updateDifficultyByScore() {
   applyDifficultySettings();
 }
 
+// Desenha a tabela de ranking (Top 5) com destaque para o melhor e para o último resultado
 function drawRanking(xCenter, startY) {
   if (ranking.length === 0) return;
 
-  let tableWidth = 340; // Largura igual à caixa do "Como Jogar" para ficar simétrico
+  let tableWidth = 340; 
   let rowHeight = 32;
   let headerHeight = 40;
   let xLeft = xCenter - tableWidth / 2;
@@ -543,12 +563,12 @@ function drawRanking(xCenter, startY) {
   let xColName = xCenter;
   let xColScore = xLeft + tableWidth - 30;
 
-  // Fundo estilizado do ranking
+
   fill(0, 0, 0, 200);
   stroke(0, 255, 0, 100);
   strokeWeight(2);
   let totalRows = max(ranking.length, 1);
-  let boxHeight = headerHeight + (totalRows * rowHeight) + 40; // Altura corrigida!
+  let boxHeight = headerHeight + (totalRows * rowHeight) + 40; 
   rect(xLeft, startY, tableWidth, boxHeight, 15);
   noStroke();
 
@@ -564,7 +584,7 @@ function drawRanking(xCenter, startY) {
   textAlign(RIGHT, TOP); text("PTS", xColScore, headerY);
 
   for (let i = 0; i < ranking.length; i++) {
-    let rowY = headerY + 25 + (rowHeight * i); // Espaçamento corrigido para não sobrepor o cabeçalho!
+    let rowY = headerY + 25 + (rowHeight * i); 
 
     if (ranking[i].isLast && gameState === "END") {
       fill(50, 255, 120); textStyle(BOLD);
@@ -579,7 +599,6 @@ function drawRanking(xCenter, startY) {
     textAlign(RIGHT, TOP); text(ranking[i].score + " pts", xColScore, rowY);
   }
   
-  // Repor alinhamento normal por precaução no final da função
   textAlign(CENTER, CENTER); 
   textStyle(NORMAL);
 }
