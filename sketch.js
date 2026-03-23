@@ -5,14 +5,6 @@
     - coordenação bilateral (usar os dois braços em simultâneo),
     - propriocepção (noção do corpo no espaço),
     - atenção sustentada e tempo de reação.
-
-  Ideia geral do funcionamento:
-  - A câmara capta a imagem em tempo real.
-  - O modelo BlazePose (via ml5.js) detecta a pose do corpo e dá as coordenadas dos pulsos.
-  - O jogo desenha círculos‑alvo no ecrã e o utilizador tenta encostar os dois pulsos a esses círculos.
-  - Se mantiver os dois pulsos dentro dos círculos durante 1 a 2 segundos, ganha 1 ponto.
-  - Ao longo de 60 segundos a dificuldade vai aumentando (alvos mais pequenos).
-  - No final é guardado um ranking das melhores pontuações no próprio browser (localStorage).
 */
 
 // ===============================
@@ -26,12 +18,13 @@ const GAME_NAME = "NeuroSymmetry Trainer";
 let video;
 let bodyPose;
 let poses = [];
+let cnv; // Variável para capturar o canvas e posicionar o input corretamente
 
 // ===============================
 // VARIÁVEIS DE ÁUDIO (SFX)
 // ===============================
-let synth; // Sintetizador virtual para gerar sons
-let lastTickTime = 0; // Controla o ritmo do som "tick" enquanto segura
+let synth; 
+let lastTickTime = 0; 
 
 // ===============================
 // VARIÁVEIS DE SUAVIZAÇÃO (LERP)
@@ -55,7 +48,14 @@ let timeLeft = 60;
 let difficulty = "FÁCIL";
 let targetBaseRadius = 90; 
 let ranking = [];
-let lastScore = null;
+let lastScore = null; 
+let lastResult = null; 
+
+// ===============================
+// NOME DO JOGADOR (INPUT)
+// ===============================
+let playerName = "";
+let nameInput; 
 
 // ===============================
 // ALVOS DO JOGO E DO MENU
@@ -77,49 +77,76 @@ let videoScale = 1;
 let videoOffsetX = 0;
 let videoOffsetY = 0;
 
+function positionNameInput() {
+  if (!nameInput || !cnv) return;
+  let inputW = 290; 
+  // Posição alinhada à direita (82% da largura do ecrã)
+  let x = cnv.position().x + (width * 0.82) - (inputW / 2);
+  let y = cnv.position().y + height * 0.30; 
+  nameInput.position(x, y);
+}
+
 function preload() {
-  // Carrega o modelo de deteção de pose (BlazePose) antes de começar o jogo.
-  // A opção flipped:false diz ao modelo que a imagem original não está espelhada;
-  // o espelho é tratado mais à frente apenas na parte de desenho.
   bodyPose = ml5.bodyPose("BlazePose", { flipped: false });
 }
 
 function setup() {
-  // Inicializa o sintetizador de som (efeitos simples tipo "ding" e "tick").
   synth = new p5.MonoSynth();
 
-  // Ler recorde gravado anteriormente no browser (se existir).
   let storedHighScore = localStorage.getItem("highScore");
   if (storedHighScore !== null) highScore = int(storedHighScore);
 
-  // Ler lista de pontuações (ranking) gravada anteriormente no browser.
   let storedRanking = localStorage.getItem("ranking");
   if (storedRanking !== null) {
-    try { ranking = JSON.parse(storedRanking); } 
-    catch (e) { ranking = []; }
+    try {
+      let parsed = JSON.parse(storedRanking);
+      if (Array.isArray(parsed)) {
+        if (parsed.length > 0 && typeof parsed[0] === "number") {
+          ranking = parsed.map((s, idx) => ({ name: "Jogador " + (idx + 1), score: s }));
+        } else {
+          ranking = parsed.map((e, idx) => {
+            if (typeof e === "number") return { name: "Jogador " + (idx + 1), score: e };
+            return { name: e.name || ("Jogador " + (idx + 1)), score: e.score || 0 };
+          });
+        }
+      } else {
+        ranking = [];
+      }
+    } catch (e) { ranking = []; }
   }
 
-  // Se houver ranking, garantir que o highScore está alinhado com a melhor pontuação.
-  if (ranking.length > 0) highScore = max(highScore, ranking[0]);
+  if (ranking.length > 0) highScore = max(highScore, ranking[0].score);
 
-  // Tamanho fixo do canvas para facilitar o design do jogo.
-  createCanvas(1280, 720);
-  // Criar o stream de vídeo da webcam.
+  // CAPTURAR O CANVAS NUMA VARIÁVEL
+  cnv = createCanvas(1280, 720);
+
+  // ESTILO NÉON PARA O INPUT
+  nameInput = createInput("");
+  nameInput.attribute("placeholder", "O teu nome");
+  nameInput.size(260);
+  nameInput.style("padding", "12px 15px");
+  nameInput.style("font-size", "22px");
+  nameInput.style("font-weight", "bold");
+  nameInput.style("border", "3px solid #00FF00"); // Borda verde néon
+  nameInput.style("border-radius", "25px");
+  nameInput.style("background", "rgba(0, 0, 0, 0.85)");
+  nameInput.style("color", "#00FF00");
+  nameInput.style("text-align", "center");
+  nameInput.style("outline", "none");
+  nameInput.style("box-shadow", "0 0 15px rgba(0, 255, 0, 0.5)"); // Efeito de brilho
+  nameInput.style("font-family", "Arial, Helvetica, sans-serif");
+
+  positionNameInput();
+  
   video = createCapture(VIDEO); 
   video.hide();
-  // Começar a deteção contínua de poses na imagem de vídeo.
   bodyPose.detectStart(video, gotPoses);
   
-  // Ajusta o raio base dos alvos em função da dificuldade inicial.
   applyDifficultySettings();
-  // Define a posição dos círculos que servem para começar/repetir o jogo.
   updateMenuTargets();
 }
 
 function updateMenuTargets() {
-  // Define dois círculos na parte inferior do ecrã.
-  // Estes círculos são usados apenas no ecrã inicial e final
-  // para o jogador iniciar ou repetir o treino encostando os dois pulsos.
   menuTargetL = { x: width * 0.25, y: height * 0.8, r: 80 };
   menuTargetR = { x: width * 0.75, y: height * 0.8, r: 80 };
 }
@@ -127,16 +154,9 @@ function updateMenuTargets() {
 function gotPoses(results) { poses = results; }
 
 function draw() {
-  // Esta função corre várias vezes por segundo (ciclo principal do jogo).
-  // A ordem é basicamente:
-  // 1) Desenhar o vídeo de fundo.
-  // 2) Atualizar a posição suavizada dos pulsos (com base na pose).
-  // 3) Desenhar os pulsos e os alvos.
-  // 4) Desenhar o ecrã de início, jogo ou fim, consoante o estado.
   background(20);
   
   if (video.width > 0 && video.height > 0) {
-    // Calcular a escala para o vídeo encher o ecrã sem ficar "esticado".
     videoScale = max(width / video.width, height / video.height);
     let drawW = video.width * videoScale;
     let drawH = video.height * videoScale;
@@ -144,37 +164,39 @@ function draw() {
     videoOffsetY = (height - drawH) / 2;
 
     push();
-    // Espelhar horizontalmente (efeito espelho):
-    // movemos a origem para a direita e depois aplicamos escala -1 no eixo X.
     translate(width, 0);
     scale(-1, 1);
     image(video, videoOffsetX, videoOffsetY, drawW, drawH);
     pop();
   }
   
-  // Atualizar as coordenadas dos pulsos com suavização (lerp).
   updateWrists();
-  // Converter as coordenadas do espaço do vídeo para o espaço do canvas.
   updateDisplayWrists();
-
-  if (gameState === "START" || gameState === "END") {
-    // Escurecer o fundo para dar mais destaque ao texto do menu.
-    fill(0, 0, 0, 180); 
-    rect(0, 0, width, height);
-  }
 
   // Desenhar os círculos verdes dos pulsos.
   drawWrists();
 
+  // Fundo escurecido para os menus
+  if (gameState === "START" || gameState === "END") {
+    fill(0, 0, 0, 180); 
+    rect(0, 0, width, height);
+  }
+
+  // Lógica dos Estados de Jogo
   if (gameState === "START") {
-    // Ecrã inicial + verificação se os pulsos estão nos círculos de arranque.
+    if (nameInput) {
+      positionNameInput();
+      nameInput.show(); // Só mostra o input no ecrã inicial
+    }
     drawStartScreen();
     checkInteraction(menuTargetL, menuTargetR, startGame);
   } 
   else if (gameState === "PLAY") {
+    if (nameInput) nameInput.hide();
     playGame();
   } 
   else if (gameState === "END") {
+    if (nameInput) nameInput.hide(); // Esconde o input no fim
     drawEndScreen();
     checkInteraction(menuTargetL, menuTargetR, startGame);
   }
@@ -185,64 +207,105 @@ function draw() {
 // ==========================================
 
 function drawStartScreen() {
-  // Ecrã de boas‑vindas com título, instruções e ranking.
   noStroke();
+  
+  // Título
+  drawingContext.shadowBlur = 20;
+  drawingContext.shadowColor = 'rgba(0, 255, 0, 0.8)';
   textAlign(CENTER, CENTER);
   fill(255);
-  textSize(58);
-  text(GAME_NAME, width / 2, height * 0.16);
+  textStyle(BOLD);
+  textSize(60);
+  text(GAME_NAME, width / 2, height * 0.12);
+  textStyle(NORMAL);
+  drawingContext.shadowBlur = 0;
 
-  let panelX = width * 0.14, panelY = height * 0.20, panelW = width * 0.72, panelH = height * 0.30;
-  fill(0, 0, 0, 170);
-  rect(panelX, panelY, panelW, panelH, 20);
+  // PAINEL ESQUERDO: COMO JOGAR
+  let panelW = 340, panelH = 280;
+  let panelX = width * 0.05; // Fica a 5% da margem esquerda
+  let panelY = height * 0.25;
+
+  fill(0, 0, 0, 200);
+  stroke(0, 255, 0, 100);
+  strokeWeight(2);
+  rect(panelX, panelY, panelW, panelH, 15);
+  noStroke();
 
   textAlign(CENTER, TOP);
-  fill(255);
-  textSize(26);
-  text("COMO JOGAR", width / 2, panelY + 18);
+  fill(0, 255, 0); textSize(24); textStyle(BOLD);
+  text("COMO JOGAR", panelX + panelW / 2, panelY + 25);
+  textStyle(NORMAL);
 
-  textSize(22);
-  text("1. Move os braços até aos círculos.\n2. Mantém os dois pulsos nos círculos 1–2s.\n3. Ganha o máximo de pontos em 60s.", width / 2, panelY + 60);
+  fill(240); textSize(18);
+  text("1. Move os braços até aos círculos.\n\n2. Mantém os pulsos nos alvos 1–2s.\n\n3. Ganha o máximo de pontos em 60s.", panelX + panelW / 2, panelY + 90);
 
-  let infoY = panelY + panelH + 20;
-  fill(255, 215, 0); textSize(32);
+  // DIREITA: TÍTULO DA CAIXA DE NOME E RANKING
+  let rightCenterX = width * 0.82; // Eixo central da coluna da direita
+  
+  textAlign(CENTER, CENTER); // Repor alinhamento
+  fill(0, 255, 0); textSize(22); textStyle(BOLD);
+  text("JOGADOR:", rightCenterX, height * 0.26);
+  textStyle(NORMAL);
+
+  // RANKING 
+  drawRanking(rightCenterX, height * 0.44); 
+
+  // CENTRO: RECORDE E DIFICULDADE
+  // ---> A CORREÇÃO PRINCIPAL ESTÁ AQUI: forçar o alinhamento ao Centro!
+  textAlign(CENTER, CENTER); 
+  let infoY = height * 0.40;
+  
+  drawingContext.shadowBlur = 15;
+  drawingContext.shadowColor = 'rgba(255, 215, 0, 0.6)';
+  fill(255, 215, 0); textSize(38); textStyle(BOLD);
   text("🏆 Recorde: " + highScore + " 🏆", width / 2, infoY);
+  textStyle(NORMAL);
+  drawingContext.shadowBlur = 0;
 
-  fill(173, 216, 230); textSize(20);
-  text("Dificuldade: " + difficulty, width / 2, infoY + 32);
+  fill(173, 216, 230); textSize(22);
+  text("Dificuldade Atual: " + difficulty, width / 2, infoY + 55);
 
-  fill(150, 255, 150); textSize(20); textAlign(CENTER, CENTER);
-  text("PARA COMEÇAR:\nColoca os dois pulsos nos círculos.", width / 2, height * 0.66);
-
-  drawRanking(height * 0.74);
+  // INSTRUÇÃO PARA COMEÇAR 
+  drawingContext.shadowBlur = 10;
+  drawingContext.shadowColor = 'rgba(0, 255, 0, 0.6)';
+  fill(150, 255, 150); textSize(22); textAlign(CENTER, CENTER); textStyle(BOLD);
+  text("PARA COMEÇAR:\nColoca os dois pulsos nos círculos abaixo.", width / 2, height * 0.75);
+  textStyle(NORMAL);
+  drawingContext.shadowBlur = 0;
 }
 
 function playGame() {
-  // Calcula há quanto tempo o jogo está a decorrer e atualiza o tempo restante.
   let elapsedTime = floor((millis() - gameStartTime) / 1000);
   timeLeft = gameDuration - elapsedTime;
   
   if (timeLeft <= 0) {
-    // Quando o tempo acaba, se houver pontuação, atualiza o ranking e grava no browser.
+    let nameToSave = playerName && playerName.trim().length > 0 ? playerName.trim() : "Anónimo";
+    
+    // Limpar os destaques anteriores
+    ranking.forEach(r => r.isLast = false);
+
     if (score > 0) {
-      ranking.push(score);
-      ranking.sort((a, b) => b - a);
+      // Adiciona a nova pontuação com a flag 'isLast' para a destacar
+      ranking.push({ name: nameToSave, score: score, isLast: true });
+      ranking.sort((a, b) => b.score - a.score);
+      
+      // Manter apenas o Top 5
       if (ranking.length > 5) ranking = ranking.slice(0, 5);
-      highScore = ranking[0];
-      localStorage.setItem("ranking", JSON.stringify(ranking));
+      if (ranking.length > 0) highScore = ranking[0].score;
+
+      // Guardar no localStorage (sem a flag isLast para não dar erros no futuro)
+      let rankingToSave = ranking.map(r => ({ name: r.name, score: r.score }));
+      localStorage.setItem("ranking", JSON.stringify(rankingToSave));
       localStorage.setItem("highScore", highScore);
     }
-    lastScore = score;
-    gameState = "END";
     
-    // SOM: Fim de Jogo (Tom grave)
+    gameState = "END";
     synth.play('C4', 0.6, 0, 0.5); 
     return;
   }
 
   noStroke(); fill(0, 0, 0, 160); rect(20, 20, width - 40, 70, 15);
 
-  // HUD superior com pontuação, tempo e dificuldade atual.
   fill(255); textSize(36);
   textAlign(LEFT, TOP); text("Pontuação: " + score, 40, 40);
   
@@ -253,10 +316,8 @@ function playGame() {
   fill(173, 216, 230); textSize(24); textAlign(CENTER, TOP);
   text("Dificuldade: " + difficulty, width / 2, 40);
 
-  // Verifica se os pulsos ficaram tempo suficiente dentro dos alvos do jogo.
   checkInteraction(targetL, targetR, function() {
     score++;
-    // SOM: Sucesso ao apanhar alvo (Ding agudo!)
     synth.play('E5', 0.5, 0, 0.2); 
     
     updateDifficultyByScore();
@@ -265,16 +326,43 @@ function playGame() {
 }
 
 function drawEndScreen() {
-  // Ecrã final que mostra a pontuação do treino e o ranking.
-  textAlign(CENTER, CENTER); noStroke();
-  fill(255); textSize(70);
-  text("FIM DO TREINO!", width / 2, height * 0.18);
+  noStroke();
+
+  let startY = height * 0.12; // Ponto de partida vertical
+
+  // Título
+  drawingContext.shadowBlur = 20;
+  drawingContext.shadowColor = 'rgba(0, 255, 0, 0.8)';
+  textAlign(CENTER, TOP); 
+  fill(255);
+  textStyle(BOLD);
+  textSize(60);
+  text(GAME_NAME, width / 2, startY);
+  drawingContext.shadowBlur = 0;
+
+  // FIM DO TREINO
+  textSize(65);
+  fill(255, 215, 0);
+  text("FIM DO TREINO!", width / 2, startY + 80);
+  textStyle(NORMAL);
   
-  textSize(45); text("Pontuação: " + score, width / 2, height * 0.34);
+  // Jogador
+  textSize(30); fill(255);
+  let displayName = playerName && playerName.trim().length > 0 ? playerName.trim() : "Anónimo";
+  text("Jogador: " + displayName, width / 2, startY + 160);
+
+  // Pontuação
+  textSize(45);
+  text("Pontuação: " + score, width / 2, startY + 205);
   
-  fill(150, 255, 150); textSize(20);
-  text("PARA REPETIR:\nColoca de novo os pulsos nos círculos.", width / 2, height * 0.55);
-  drawRanking(height * 0.63);
+  // Ranking (Agora limpo e com o destaque inserido)
+  drawRanking(width / 2, startY + 280);
+
+  // Instrução para Repetir
+  fill(150, 255, 150); textSize(20); textStyle(BOLD);
+  textAlign(CENTER, TOP);
+  text("PARA REPETIR:\nColoca de novo os pulsos nos círculos abaixo.", width / 2, height * 0.84);
+  textStyle(NORMAL);
 }
 
 // ==========================================
@@ -282,11 +370,6 @@ function drawEndScreen() {
 // ==========================================
 
 function getMainPose() {
-  // Seleciona uma única pessoa para ser o "jogador principal".
-  // Isto é importante quando aparecem várias pessoas na imagem da câmara.
-  // A escolha é feita com base na posição do nariz:
-  //  - se já temos um nariz guardado (mainPersonNose), escolhemos quem estiver mais perto dele;
-  //  - se ainda não temos, escolhemos a pessoa mais próxima do centro da imagem.
   if (!poses || poses.length === 0) return null;
   let bestPose = null, bestScore = Infinity; 
   for (let p of poses) {
@@ -312,7 +395,6 @@ function getMainPose() {
 }
 
 function updateWrists() {
-  // Atualiza a posição SUAVIZADA dos pulsos a partir da pose principal.
   let pose = getMainPose();
   if (pose) {
     let lw = pose.left_wrist, rw = pose.right_wrist;
@@ -330,8 +412,6 @@ function updateWrists() {
 }
 
 function updateDisplayWrists() {
-  // Converte as coordenadas dos pulsos do sistema de vídeo para o sistema do canvas,
-  // aplicando a escala (videoScale), o deslocamento (offset) e o espelho horizontal.
   displayWristL.confidence = smoothWristL.confidence;
   if (smoothWristL.confidence > 0.1) {
     displayWristL.x = width - (videoOffsetX + smoothWristL.x * videoScale);
@@ -345,15 +425,12 @@ function updateDisplayWrists() {
 }
 
 function drawWrists() {
-  // Desenha pequenos círculos verdes na posição estimada de cada pulso.
   fill(0, 255, 0); noStroke();
   if (displayWristL.confidence > 0.1) circle(displayWristL.x, displayWristL.y, 30);
   if (displayWristR.confidence > 0.1) circle(displayWristR.x, displayWristR.y, 30);
 }
 
 function checkInteraction(tL, tR, onSuccessCallback) {
-  // Função genérica que verifica se os dois pulsos estão dentro de dois círculos (tL e tR)
-  // e se lá permanecem o tempo suficiente. Se sim, chama a função onSuccessCallback().
   let isHovering = false;
   if (displayWristL.confidence > 0.1 && displayWristR.confidence > 0.1) {
     let distL = dist(displayWristL.x, displayWristL.y, tL.x, tL.y);
@@ -362,30 +439,25 @@ function checkInteraction(tL, tR, onSuccessCallback) {
   }
 
   if (isHovering) {
-    // Começou agora a segurar dentro dos círculos.
     if (!isHolding) {
       isHolding = true;
       holdStartMillis = millis();
       requiredHoldTime = random(HOLD_TIME_MIN, HOLD_TIME_MAX);
     } else {
-      // Já está a segurar: medir há quanto tempo se mantém nos círculos.
       let holdDuration = millis() - holdStartMillis;
       
-      // SOM: Ticking progressivo enquanto segura
       if (millis() - lastTickTime > 150) {
-          synth.play('C6', 0.05, 0, 0.05); // Som curtinho e muito baixo
+          synth.play('C5', 0.05, 0, 0.05); 
           lastTickTime = millis();
       }
 
       if (holdDuration >= requiredHoldTime) {
-          // Chegou ao tempo necessário => interação concluída com sucesso.
         isHolding = false; 
         onSuccessCallback(); 
         return; 
       }
     }
   } else {
-    // Assim que sai de qualquer um dos círculos, a contagem é interrompida.
     isHolding = false; 
   }
 
@@ -399,7 +471,6 @@ function checkInteraction(tL, tR, onSuccessCallback) {
   circle(tR.x, tR.y, tR.r * 2);
 
   if (isHovering && isHolding) {
-    // Desenhar um arco de progresso à volta de cada alvo a indicar o tempo restante.
     let holdDuration = millis() - holdStartMillis;
     let progress = map(holdDuration, 0, requiredHoldTime, 0, 360);
     progress = constrain(progress, 0, 360);
@@ -416,8 +487,6 @@ function checkInteraction(tL, tR, onSuccessCallback) {
 }
 
 function generateTargets() {
-  // Gera novas posições aleatórias para os dois alvos do jogo (esquerda e direita),
-  // garantindo que um fica em cada metade do ecrã e afastado das margens.
   let margin = 150; 
   targetL.r = targetBaseRadius; targetR.r = targetBaseRadius;
   targetL.x = random(margin, (width / 2) - margin); targetL.y = random(margin, height - margin);
@@ -425,21 +494,21 @@ function generateTargets() {
 }
 
 function startGame() {
-  // Obrigatório para alguns browsers permitirem som: inicializar no primeiro clique/interação
   userStartAudio();
   
-  // Reiniciar variáveis principais do jogo.
+  if (nameInput) {
+    playerName = nameInput.value();
+  }
+  
   score = 0; timeLeft = gameDuration; gameStartTime = millis();
   isHolding = false; gameState = "PLAY"; difficulty = "FÁCIL";
   
-  // SOM: Início de Jogo!
   synth.play('G4', 0.5, 0, 0.3);
 
   applyDifficultySettings(); generateTargets();
 }
 
 function applyDifficultySettings() {
-  // Define o raio base dos alvos em função da dificuldade atual.
   if (difficulty === "FÁCIL") targetBaseRadius = 100;
   else if (difficulty === "MÉDIO") targetBaseRadius = 80;
   else if (difficulty === "DIFÍCIL") {
@@ -449,56 +518,68 @@ function applyDifficultySettings() {
 }
 
 function updateDifficultyByScore() {
-  // Atualiza o nível de dificuldade automaticamente a partir da pontuação.
   let oldDifficulty = difficulty;
 
   if (score >= 10) difficulty = "DIFÍCIL";
   else if (score >= 5) difficulty = "MÉDIO";
   else difficulty = "FÁCIL";
 
-  // SOM: Subida de nível (nota mais alta)
   if (difficulty !== oldDifficulty) {
-    setTimeout(() => { synth.play('C6', 0.6, 0, 0.4); }, 200); // Toca com 200ms de atraso para não misturar com o Ding
+    setTimeout(() => { synth.play('C6', 0.6, 0, 0.4); }, 200); 
   }
 
   applyDifficultySettings();
 }
 
-function drawRanking(startY) {
-  // Desenha a tabela de ranking (TOP 5) e a linha "VOCÊ" com a última pontuação.
-  // O ranking é guardado no browser, por isso mantém‑se entre sessões.
-  if (ranking.length === 0 && lastScore === null) return;
+function drawRanking(xCenter, startY) {
+  if (ranking.length === 0) return;
 
-  let tableWidth = 380, rowHeight = 20, headerHeight = 28;
-  let xCenter = width / 2, xLeft = xCenter - tableWidth / 2;
-  let xColPos = xLeft + 40, xColScore = xLeft + tableWidth - 60;
+  let tableWidth = 340; // Largura igual à caixa do "Como Jogar" para ficar simétrico
+  let rowHeight = 32;
+  let headerHeight = 40;
+  let xLeft = xCenter - tableWidth / 2;
 
-  noStroke(); fill(0, 0, 0, 170);
-  let totalRows = max(ranking.length, 1) + (lastScore !== null ? 3 : 1);
-  rect(xLeft, startY - 10, tableWidth, headerHeight + rowHeight * totalRows, 12);
+  let xColPos = xLeft + 30;
+  let xColName = xCenter;
+  let xColScore = xLeft + tableWidth - 30;
 
-  textAlign(CENTER, TOP); textSize(18); fill(255);
-  text("RANKING", xCenter, startY - 4);
+  // Fundo estilizado do ranking
+  fill(0, 0, 0, 200);
+  stroke(0, 255, 0, 100);
+  strokeWeight(2);
+  let totalRows = max(ranking.length, 1);
+  let boxHeight = headerHeight + (totalRows * rowHeight) + 40; // Altura corrigida!
+  rect(xLeft, startY, tableWidth, boxHeight, 15);
+  noStroke();
 
-  textSize(14); textAlign(LEFT, TOP); fill(200);
-  text("POS", xColPos, startY + headerHeight - 4);
-  textAlign(RIGHT, TOP); text("PTS", xColScore, startY + headerHeight - 4);
+  textAlign(CENTER, TOP); textSize(20); fill(0, 255, 0); textStyle(BOLD);
+  text("RANKING TOP 5", xCenter, startY + 15);
+  textStyle(NORMAL);
+
+  let headerY = startY + 55;
+
+  textSize(14); fill(180);
+  textAlign(LEFT, TOP); text("POS", xColPos, headerY);
+  textAlign(CENTER, TOP); text("NOME", xColName, headerY);
+  textAlign(RIGHT, TOP); text("PTS", xColScore, headerY);
 
   for (let i = 0; i < ranking.length; i++) {
-    let y = startY + headerHeight + rowHeight * (i + 1);
-    if (i === 0) fill(255, 215, 0); else fill(230);
-    textAlign(LEFT, TOP); text((i + 1) + "º", xColPos, y);
-    textAlign(RIGHT, TOP); text(ranking[i] + " pts", xColScore, y);
-  }
+    let rowY = headerY + 25 + (rowHeight * i); // Espaçamento corrigido para não sobrepor o cabeçalho!
 
-  if (lastScore !== null) {
-    let yLine = startY + headerHeight + rowHeight * (ranking.length + 1.2);
-    stroke(255, 255, 255, 100); line(xLeft + 20, yLine, xLeft + tableWidth - 20, yLine);
-    noStroke();
-
-    let yPlayer = yLine + 6;
-    if (ranking.length > 0 && lastScore === ranking[0]) fill(50, 255, 120); else fill(135, 206, 250);
-    textAlign(LEFT, TOP); text("VOCÊ", xColPos, yPlayer);
-    textAlign(RIGHT, TOP); text(lastScore + " pts", xColScore, yPlayer);
+    if (ranking[i].isLast && gameState === "END") {
+      fill(50, 255, 120); textStyle(BOLD);
+    } else if (i === 0) { 
+      fill(255, 215, 0); textStyle(BOLD); 
+    } else { 
+      fill(230); textStyle(NORMAL); 
+    }
+    
+    textAlign(LEFT, TOP); text((i + 1) + "º", xColPos, rowY);
+    textAlign(CENTER, TOP); text(ranking[i].name, xColName, rowY);
+    textAlign(RIGHT, TOP); text(ranking[i].score + " pts", xColScore, rowY);
   }
+  
+  // Repor alinhamento normal por precaução no final da função
+  textAlign(CENTER, CENTER); 
+  textStyle(NORMAL);
 }
